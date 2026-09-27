@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HireAI — Candidates</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+    flex-wrap: wrap;
+  }
+  .search-input {
+    max-width: 280px;
+  }
+  .filter-bar {
+    display: flex;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+  }
+  .filter-chip {
+    padding: 6px 16px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--color-text-muted);
+  }
+  .filter-chip.active {
+    background: var(--color-primary);
+    color: #fff;
+    border-color: var(--color-primary);
+  }
+  .candidate-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-sm);
+    cursor: pointer;
+    transition: box-shadow 0.15s ease;
+  }
+  .candidate-row:hover { box-shadow: var(--shadow-sm); }
+  .avatar-circle {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  .score-badge {
+    font-weight: 700;
+    font-size: 15px;
+    min-width: 50px;
+    text-align: right;
+  }
+  .skill-tag {
+    display: inline-flex;
+    padding: 3px 10px;
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    font-weight: 600;
+    margin: 2px 4px 2px 0;
+  }
+  .skill-matched { background: var(--color-success-light); color: var(--color-success); }
+  .skill-missing { background: var(--color-danger-light); color: var(--color-danger); }
+  .badge-selected { background: var(--color-primary-light); color: var(--color-primary); }
+
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: var(--space-lg);
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    padding: var(--space-xl);
+    width: 100%;
+    max-width: 560px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+  }
+  .modal-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: var(--color-text-muted);
+    float: right;
+  }
+  .modal-section {
+    margin-top: var(--space-lg);
+    padding-top: var(--space-lg);
+    border-top: 1px solid var(--color-border);
+  }
+  .question-item, .suggestion-item {
+    padding: var(--space-sm) 0;
+    font-size: 14px;
+    display: flex;
+    gap: var(--space-sm);
+  }
+  .status-action-row {
+    display: flex;
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+    flex-wrap: wrap;
+  }
+  .empty-state {
+    text-align: center;
+    padding: var(--space-2xl);
+    color: var(--color-text-muted);
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarRoot"></div>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1>Candidates</h1>
+        <p class="text-muted mt-md">All screened candidates across your job postings.</p>
+      </div>
+      <button class="btn btn-secondary" onclick="exportCSV()">⬇ Export CSV</button>
+    </div>
+
+    <div class="toolbar">
+      <div class="filter-bar" id="filterBar"></div>
+      <input type="text" id="searchInput" class="form-input search-input" placeholder="🔍 Search by name or email…" oninput="renderCandidates()" />
+    </div>
+
+    <div id="candidatesList"></div>
+  </main>
+</div>
+
+<!-- Candidate Detail Modal -->
+<div class="modal-overlay" id="candidateModal">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div id="modalContent"></div>
+  </div>
+</div>
+
+<script src="js/theme.js"></script>
+<script src="js/dummy-data.js"></script>
+<script src="js/sidebar.js"></script>
+<script>
+  if (localStorage.getItem('hireai_logged_in') !== 'true') {
+    window.location.href = 'login.html';
+  }
+  renderSidebar('candidates');
+
+  const API_BASE = 'http://127.0.0.1:5000';
+  let candidatesData = [];
+  let activeFilter = 'All';
+  const filters = ['All', 'Selected', 'Shortlisted', 'Under Review', 'Rejected'];
+
+  // ---- Fetch candidates from backend ----
+  async function loadCandidates() {
+    document.getElementById('candidatesList').innerHTML = `<div class="card empty-state">Loading candidates…</div>`;
+    try {
+      const res = await fetch(`${API_BASE}/api/candidates`);
+      candidatesData = await res.json();
+      renderCandidates();
+    } catch (err) {
+      document.getElementById('candidatesList').innerHTML = `<div class="card empty-state">Could not reach the backend. Is the Flask server running?</div>`;
+    }
+  }
+
+  // "2026-09-26 09:01:00" -> "26 Sep 2026, 9:01 AM"
+  function formatDateTime(value) {
+    if (!value) return 'N/A';
+    const d = new Date(String(value).replace(' ', 'T'));
+    if (isNaN(d.getTime())) return value;
+    return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
+
+  function statusBadgeClass(status) {
+    if (status === 'Selected') return 'badge-selected';
+    if (status === 'Shortlisted') return 'badge-success';
+    if (status === 'Rejected') return 'badge-danger';
+    return 'badge-warning';
+  }
+
+  function renderFilterBar() {
+    document.getElementById('filterBar').innerHTML = filters.map(f => `
+      <button class="filter-chip ${f === activeFilter ? 'active' : ''}" onclick="setFilter('${f}')">${f}</button>
+    `).join("");
+  }
+
+  function setFilter(f) {
+    activeFilter = f;
+    renderFilterBar();
+    renderCandidates();
+  }
+
+  function getFilteredList() {
+    let list = activeFilter === 'All'
+      ? candidatesData
+      : candidatesData.filter(c => c.status === activeFilter);
+
+    const query = document.getElementById('searchInput').value.trim().toLowerCase();
+    if (query) {
+      list = list.filter(c =>
+        c.name.toLowerCase().includes(query) || (c.email || '').toLowerCase().includes(query)
+      );
+    }
+    return [...list].sort((a, b) => b.matchScore - a.matchScore);
+  }
+
+  function renderCandidates() {
+    const list = getFilteredList();
+
+    if (list.length === 0) {
+      document.getElementById('candidatesList').innerHTML = `<div class="card empty-state">No candidates match your search/filter.</div>`;
+      return;
+    }
+
+    document.getElementById('candidatesList').innerHTML = list.map(c => `
+      <div class="candidate-row" onclick="openCandidate(${c.id})">
+        <div class="flex items-center gap-md">
+          <div class="avatar-circle">${c.name.split(" ").map(n => n[0]).join("")}</div>
+          <div>
+            <div style="font-weight:600;">${c.name}</div>
+            <div class="text-muted text-sm">${c.email || ''} · ${c.experience} · Screened ${formatDateTime(c.screenedAt)}</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-lg">
+          <span class="badge ${statusBadgeClass(c.status)}">${c.status}</span>
+          <span class="score-badge" style="color:${c.matchScore >= 80 ? 'var(--color-success)' : c.matchScore >= 60 ? 'var(--color-warning)' : 'var(--color-danger)'};">${c.matchScore}%</span>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  function openCandidate(id) {
+    const c = candidatesData.find(x => x.id === id);
+    if (!c) return;
+
+    document.getElementById('modalContent').innerHTML = `
+      <div class="flex items-center gap-md mb-md">
+        <div class="avatar-circle" style="width:56px;height:56px;font-size:18px;">${c.name.split(" ").map(n => n[0]).join("")}</div>
+        <div>
+          <h2>${c.name}</h2>
+          <div class="text-muted text-sm">${c.email || ''} · ${c.experience} experience</div>
+          <div class="text-muted text-sm">Screened on ${formatDateTime(c.screenedAt)}</div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-md mb-md">
+        <span class="badge ${statusBadgeClass(c.status)}" id="modalStatusBadge">${c.status}</span>
+        <span class="score-badge" style="color:${c.matchScore >= 80 ? 'var(--color-success)' : c.matchScore >= 60 ? 'var(--color-warning)' : 'var(--color-danger)'};">${c.matchScore}% match</span>
+      </div>
+
+      <div class="status-action-row">
+        <button class="btn btn-primary btn-sm" onclick="setStatus(${c.id}, 'Shortlisted')">✓ Shortlist</button>
+        <button class="btn btn-secondary btn-sm" onclick="setStatus(${c.id}, 'Under Review')">↺ Under Review</button>
+        <button class="btn btn-danger btn-sm" onclick="setStatus(${c.id}, 'Rejected')">✕ Reject</button>
+      </div>
+
+      <div class="mt-lg">
+        <div class="text-sm text-muted mb-md">Skills Matched</div>
+        ${c.skillsMatched.map(s => `<span class="skill-tag skill-matched">✓ ${s}</span>`).join("") || '<span class="text-sm text-muted">None</span>'}
+      </div>
+      <div class="mt-md">
+        <div class="text-sm text-muted mb-md">Skill Gaps</div>
+        ${c.skillsMissing.map(s => `<span class="skill-tag skill-missing">✕ ${s}</span>`).join("") || '<span class="text-sm text-muted">None</span>'}
+      </div>
+
+            <div class="modal-section">
+        <h3 class="mb-md">🎤 AI-Suggested Interview Questions</h3>
+        ${(c.interviewQuestions && c.interviewQuestions.length)
+          ? c.interviewQuestions.map(q => `<div class="question-item"><span>•</span><span>${q}</span></div>`).join("")
+          : '<div class="text-sm text-muted">Not available — this candidate wasn\'t screened through the AI upload flow.</div>'}
+      </div>
+
+      <div class="modal-section">
+        <h3 class="mb-md">📝 Resume Improvement Suggestions</h3>
+        ${(c.resumeSuggestions && c.resumeSuggestions.length)
+          ? c.resumeSuggestions.map(s => `<div class="suggestion-item"><span>💡</span><span>${s}</span></div>`).join("")
+          : '<div class="text-sm text-muted">Not available — this candidate wasn\'t screened through the AI upload flow.</div>'}
+      </div>
+    `;
+
+    document.getElementById('candidateModal').classList.add('open');
+  }
+
+  // ---- Update status via backend, then refresh ----
+  async function setStatus(id, newStatus) {
+    try {
+      await fetch(`${API_BASE}/api/candidates/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+    } catch (err) {
+      alert("Could not reach the backend. Is the Flask server running?");
+      return;
+    }
+
+    const c = candidatesData.find(x => x.id === id);
+    if (c) c.status = newStatus;
+
+    const badge = document.getElementById('modalStatusBadge');
+    if (badge) {
+      badge.textContent = newStatus;
+      badge.className = 'badge ' + statusBadgeClass(newStatus);
+    }
+    renderCandidates();
+  }
+
+  function closeModal() {
+    document.getElementById('candidateModal').classList.remove('open');
+  }
+
+  // Export currently filtered/searched candidates as a downloadable CSV
+  function exportCSV() {
+    const list = getFilteredList();
+    if (list.length === 0) {
+      alert("No candidates to export.");
+      return;
+    }
+    const headers = ["Name", "Email", "Experience", "Match Score", "Status", "Screened At", "Skills Matched", "Skills Missing"];
+    const rows = list.map(c => [
+      c.name, c.email || '', c.experience, c.matchScore + "%", c.status, formatDateTime(c.screenedAt),
+      c.skillsMatched.join("; "), c.skillsMissing.join("; ")
+    ]);
+
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `hireai-candidates-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  renderFilterBar();
+  loadCandidates();
+</script>
+
+</body>
+</html>

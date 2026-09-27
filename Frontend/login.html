@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HireAI — Login</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  .auth-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--color-primary-light), var(--color-bg));
+    padding: var(--space-lg);
+  }
+  .auth-card {
+    width: 100%;
+    max-width: 400px;
+    padding: var(--space-2xl) var(--space-xl);
+  }
+  .auth-logo {
+    text-align: center;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--color-primary);
+    margin-bottom: var(--space-sm);
+  }
+  .auth-subtitle {
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 14px;
+    margin-bottom: var(--space-xl);
+  }
+  .auth-toggle {
+    display: flex;
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+    padding: 4px;
+    margin-bottom: var(--space-xl);
+  }
+  .auth-toggle button {
+    flex: 1;
+    padding: 8px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--color-text-muted);
+    cursor: pointer;
+  }
+  .auth-toggle button.active {
+    background: var(--color-surface);
+    color: var(--color-primary);
+    box-shadow: var(--shadow-sm);
+  }
+  .auth-error {
+    display: none;
+    background: var(--color-danger-light);
+    color: var(--color-danger);
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    margin-bottom: var(--space-md);
+  }
+  .auth-success {
+    display: none;
+    background: var(--color-success-light);
+    color: var(--color-success);
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    margin-bottom: var(--space-md);
+  }
+  .auth-footer-note {
+    text-align: center;
+    font-size: 12px;
+    color: var(--color-text-light);
+    margin-top: var(--space-lg);
+  }
+  .auth-back-link {
+    display: block;
+    text-align: center;
+    font-size: 13px;
+    color: var(--color-text-muted);
+    margin-top: var(--space-md);
+  }
+</style>
+</head>
+<body>
+
+<div class="auth-page">
+  <div class="card auth-card" style="position:relative;">
+    <button id="themeToggleBtn" class="theme-toggle" style="position:absolute; top:16px; right:16px; width:auto; margin-top:0;" onclick="toggleTheme()">🌙</button>
+    <div class="auth-logo">⚡ HireAI</div>
+    <div class="auth-subtitle">Intelligent Recruitment & Resume Screening</div>
+
+    <div class="auth-toggle">
+      <button id="tabLogin" class="active" onclick="setMode('login')">Login</button>
+      <button id="tabRegister" onclick="setMode('register')">Register</button>
+    </div>
+
+    <div id="authError" class="auth-error"></div>
+    <div id="authSuccess" class="auth-success"></div>
+
+    <form id="authForm" onsubmit="handleSubmit(event)">
+      <!-- Decoy fields to trick browser autofill into filling these instead of the real fields -->
+<input type="text" name="fakeusernameremembered" style="display:none" tabindex="-1" autocomplete="off" />
+<input type="password" name="fakepasswordremembered" style="display:none" tabindex="-1" autocomplete="off" />
+      <div class="form-group" id="nameGroup" style="display:none;">
+        <label class="form-label">Full Name</label>
+        <input type="text" id="name" class="form-input" placeholder="Priya Sharma" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input type="email" id="email" class="form-input" placeholder="Enter mail id" required />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" id="password" class="form-input" placeholder="••••••••" required />
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block" id="submitBtn">Login</button>
+    </form>
+
+    <div class="auth-footer-note">
+      Connected to live backend — register a new account, then log in.
+    </div>
+    <a href="index.html" class="auth-back-link">← Back to home</a>
+  </div>
+</div>
+
+<script src="js/theme.js"></script>
+<script>
+  let mode = 'login';
+  updateThemeToggleLabel();
+
+  const API_BASE = 'http://127.0.0.1:5000';
+
+  // If the landing page sent us here via "Sign Up" (login.html?mode=register), open the Register tab
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('mode') === 'register') {
+    setMode('register');
+  }
+
+  function setMode(newMode) {
+    mode = newMode;
+    document.getElementById('tabLogin').classList.toggle('active', mode === 'login');
+    document.getElementById('tabRegister').classList.toggle('active', mode === 'register');
+    document.getElementById('nameGroup').style.display = mode === 'register' ? 'block' : 'none';
+    document.getElementById('submitBtn').textContent = mode === 'register' ? 'Create Account' : 'Login';
+    document.getElementById('authError').style.display = 'none';
+    document.getElementById('authSuccess').style.display = 'none';
+    document.getElementById('authForm').reset();
+  }
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const name = document.getElementById('name').value.trim();
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value.trim();
+    const errorBox = document.getElementById('authError');
+    const successBox = document.getElementById('authSuccess');
+    errorBox.style.display = 'none';
+    successBox.style.display = 'none';
+
+    if (!email || !password) {
+      errorBox.textContent = "Please fill in all required fields.";
+      errorBox.style.display = 'block';
+      return;
+    }
+
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = mode === 'register' ? 'Creating account…' : 'Logging in…';
+
+    try {
+      if (mode === 'register') {
+        const res = await fetch(`${API_BASE}/api/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, password })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          errorBox.textContent = data.error || "Registration failed.";
+          errorBox.style.display = 'block';
+        } else {
+          successBox.textContent = "Account created! Switching to login…";
+          successBox.style.display = 'block';
+          setTimeout(() => setMode('login'), 1200);
+        }
+      } else {
+        const res = await fetch(`${API_BASE}/api/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          errorBox.textContent = data.error || "Login failed.";
+          errorBox.style.display = 'block';
+        } else {
+          localStorage.setItem('hireai_logged_in', 'true');
+          localStorage.setItem('hireai_user_email', data.user.email);
+          localStorage.setItem('hireai_user_name', data.user.name || '');
+          window.location.href = 'dashboard.html';
+        }
+      }
+    } catch (err) {
+      errorBox.textContent = "Could not reach the backend. Is the Flask server running?";
+      errorBox.style.display = 'block';
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = mode === 'register' ? 'Create Account' : 'Login';
+    }
+  }
+</script>
+
+</body>
+</html>

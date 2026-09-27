@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HireAI — Intelligent Recruitment & Resume Screening</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  body { margin: 0; }
+  .landing-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md) var(--space-2xl);
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .landing-logo {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+  .landing-nav-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+  .hero {
+    text-align: center;
+    padding: var(--space-2xl) var(--space-lg) var(--space-2xl);
+    background: linear-gradient(135deg, var(--color-primary-light), var(--color-bg));
+  }
+  .hero h1 {
+    font-size: 40px;
+    max-width: 720px;
+    margin: 0 auto var(--space-md);
+    line-height: 1.2;
+  }
+  .hero p {
+    max-width: 560px;
+    margin: 0 auto var(--space-xl);
+    color: var(--color-text-muted);
+    font-size: 16px;
+  }
+  .hero-actions {
+    display: flex;
+    gap: var(--space-md);
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .hero-actions .btn { padding: 12px 28px; font-size: 15px; }
+
+  .section {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: var(--space-2xl) var(--space-lg);
+  }
+  .section-title {
+    text-align: center;
+    margin-bottom: var(--space-2xl);
+  }
+  .section-title h2 { margin-bottom: var(--space-sm); }
+  .section-title p { color: var(--color-text-muted); }
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: var(--space-lg);
+  }
+  .feature-card { text-align: left; }
+  .feature-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-md);
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    margin-bottom: var(--space-md);
+  }
+  .feature-card h3 { margin-bottom: var(--space-sm); font-size: 16px; }
+  .feature-card p { color: var(--color-text-muted); font-size: 14px; margin: 0; }
+
+  .steps-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-lg);
+  }
+  .step-card { text-align: center; }
+  .step-number {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--color-primary);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    margin: 0 auto var(--space-md);
+  }
+  .step-card h3 { font-size: 15px; margin-bottom: var(--space-sm); }
+  .step-card p { color: var(--color-text-muted); font-size: 13px; margin: 0; }
+
+  .cta-band {
+    text-align: center;
+    background: var(--color-surface);
+    border-top: 1px solid var(--color-border);
+    padding: var(--space-2xl) var(--space-lg);
+  }
+  .cta-band h2 { margin-bottom: var(--space-md); }
+
+  .landing-footer {
+    text-align: center;
+    padding: var(--space-lg);
+    color: var(--color-text-light);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<nav class="landing-nav">
+  <div class="landing-logo">⚡ HireAI</div>
+  <div class="landing-nav-actions">
+    <button id="themeToggleBtn" class="theme-toggle" onclick="toggleTheme()">🌙</button>
+    <a href="login.html" class="btn btn-secondary btn-sm">Sign In</a>
+    <a href="login.html?mode=register" class="btn btn-primary btn-sm">Sign Up</a>
+  </div>
+</nav>
+
+<section class="hero">
+  <h1>Hire the right people, faster — with AI doing the screening for you</h1>
+  <p>HireAI reads every resume, scores it against your job requirements, and tells you exactly who to talk to first — so your team spends time interviewing, not sorting PDFs.</p>
+  <div class="hero-actions">
+    <a href="login.html?mode=register" class="btn btn-primary">Get Started Free</a>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-title">
+    <h2>Everything you need to screen candidates smartly</h2>
+    <p>Built for recruiters and hiring teams who want less manual work and better shortlists.</p>
+  </div>
+  <div class="feature-grid">
+    <div class="card feature-card">
+      <div class="feature-icon">🤖</div>
+      <h3>AI Resume Screening</h3>
+      <p>Every uploaded resume is read and scored against the job's required skills using Google Gemini — no manual reading needed.</p>
+    </div>
+    <div class="card feature-card">
+      <div class="feature-icon">🎯</div>
+      <h3>Match Scoring</h3>
+      <p>Each candidate gets a clear match score, matched skills, and skill gaps — so you know exactly how they compare.</p>
+    </div>
+    <div class="card feature-card">
+      <div class="feature-icon">✅</div>
+      <h3>Auto-Select & Hiring Status</h3>
+      <p>Candidates crossing your match-score bar are auto-marked Selected, and a job shows "Hiring Done" once enough openings are filled.</p>
+    </div>
+    <div class="card feature-card">
+      <div class="feature-icon">🔁</div>
+      <h3>Duplicate Protection</h3>
+      <p>The same person can't be screened twice for the same job — HireAI detects repeats by email or resume and shows the existing result instead.</p>
+    </div>
+    <div class="card feature-card">
+      <div class="feature-icon">🎤</div>
+      <h3>Interview Questions</h3>
+      <p>AI drafts interview questions tailored to each candidate's resume and the gaps in their skill set.</p>
+    </div>
+    <div class="card feature-card">
+      <div class="feature-icon">📋</div>
+      <h3>One Candidates Dashboard</h3>
+      <p>Filter, search, and export every candidate across all your open roles from a single screen.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-title">
+    <h2>How it works</h2>
+    <p>From job posting to shortlist in three steps.</p>
+  </div>
+  <div class="steps-grid">
+    <div class="card step-card">
+      <div class="step-number">1</div>
+      <h3>Post a job</h3>
+      <p>Add the title, department, and description — AI extracts the required skills automatically.</p>
+    </div>
+    <div class="card step-card">
+      <div class="step-number">2</div>
+      <h3>Upload resumes</h3>
+      <p>Drag and drop PDF resumes; each one is screened and scored against that job in seconds.</p>
+    </div>
+    <div class="card step-card">
+      <div class="step-number">3</div>
+      <h3>Review & hire</h3>
+      <p>See ranked candidates, matched/missing skills, and interview questions — ready to move forward.</p>
+    </div>
+  </div>
+</section>
+
+<div class="cta-band">
+  <h2>Ready to screen smarter?</h2>
+  <p class="text-muted">Create your free account using the Sign Up button above and post your first job in minutes.</p>
+</div>
+
+<div class="landing-footer">© 2026 HireAI. Built for smarter hiring.</div>
+
+<script src="js/theme.js"></script>
+<script>
+  updateThemeToggleLabel();
+</script>
+
+</body>
+</html>

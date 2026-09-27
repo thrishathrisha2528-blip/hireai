@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HireAI — Dashboard</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  .stat-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+  }
+  .stat-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    margin-bottom: var(--space-sm);
+  }
+  .job-row, .candidate-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md) 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .job-row:last-child, .candidate-row:last-child { border-bottom: none; }
+  .avatar-circle {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  .score-pill {
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .section-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-md);
+  }
+  .empty-state {
+    text-align: center;
+    padding: var(--space-lg);
+    color: var(--color-text-muted);
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarRoot"></div>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1>Welcome back, <span id="userNameHeading"></span> 👋</h1>
+        <p class="text-muted mt-md">Here's what's happening with your hiring pipeline today.</p>
+      </div>
+      <a href="jobs.html" class="btn btn-primary">+ New Job Description</a>
+    </div>
+
+    <!-- Stat cards -->
+    <div class="grid grid-4 mb-lg" id="statCards"></div>
+
+    <div class="grid grid-2">
+      <!-- Recent jobs -->
+      <div class="card">
+        <div class="section-title-row">
+          <h3>Recent Job Postings</h3>
+          <a href="jobs.html" class="text-sm" style="color:var(--color-primary);font-weight:600;">View all →</a>
+        </div>
+        <div id="recentJobs"></div>
+      </div>
+
+      <!-- Top candidates -->
+      <div class="card">
+        <div class="section-title-row">
+          <h3>Top Matching Candidates</h3>
+          <a href="candidates.html" class="text-sm" style="color:var(--color-primary);font-weight:600;">View all →</a>
+        </div>
+        <div id="topCandidates"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/theme.js"></script>
+<script src="js/dummy-data.js"></script>
+<script src="js/sidebar.js"></script>
+<script>
+  if (localStorage.getItem('hireai_logged_in') !== 'true') {
+    window.location.href = 'login.html';
+  }
+
+  renderSidebar('dashboard');
+  document.getElementById('userNameHeading').textContent =
+    (localStorage.getItem('hireai_user_name') || DUMMY_USER.name).split(" ")[0];
+
+  const API_BASE = 'http://127.0.0.1:5000';
+
+  async function loadDashboard() {
+    document.getElementById('statCards').innerHTML = `<div class="card empty-state">Loading…</div>`;
+    document.getElementById('recentJobs').innerHTML = '';
+    document.getElementById('topCandidates').innerHTML = '';
+
+    try {
+      const res = await fetch(`${API_BASE}/api/dashboard`);
+      const data = await res.json();
+      renderStats(data.stats);
+      renderRecentJobs(data.recentJobs);
+      renderTopCandidates(data.topCandidates);
+    } catch (err) {
+      document.getElementById('statCards').innerHTML =
+        `<div class="card empty-state" style="grid-column: span 4;">Could not reach the backend. Is the Flask server running?</div>`;
+    }
+  }
+
+  function renderStats(stats) {
+    const statConfig = [
+      { label: "Active Jobs", value: stats.totalJobs, icon: "📋", bg: "var(--color-primary-light)", color: "var(--color-primary)" },
+      { label: "Candidates Screened", value: stats.totalCandidates, icon: "📄", bg: "var(--color-secondary)", color: "#fff" },
+      { label: "Shortlisted", value: stats.shortlisted, icon: "✅", bg: "var(--color-success-light)", color: "var(--color-success)" },
+      { label: "Avg. Match Score", value: stats.avgMatchScore + "%", icon: "🎯", bg: "var(--color-warning-light)", color: "var(--color-warning)" },
+    ];
+
+    document.getElementById('statCards').innerHTML = statConfig.map(s => `
+      <div class="card stat-card">
+        <div class="stat-icon" style="background:${s.bg};color:${s.color === '#fff' ? '#fff' : s.color};">${s.icon}</div>
+        <div class="stat-value">${s.value}</div>
+        <div class="text-muted text-sm">${s.label}</div>
+      </div>
+    `).join("");
+  }
+
+  function renderRecentJobs(jobs) {
+    if (!jobs || jobs.length === 0) {
+      document.getElementById('recentJobs').innerHTML = `<div class="empty-state">No jobs yet.</div>`;
+      return;
+    }
+    document.getElementById('recentJobs').innerHTML = jobs.map(job => `
+      <div class="job-row">
+        <div>
+          <div style="font-weight:600;font-size:14px;">${job.title}</div>
+          <div class="text-muted text-sm">${job.department} · Posted ${job.postedOn}</div>
+        </div>
+        <span class="badge ${job.status === 'Active' ? 'badge-success' : 'badge-danger'}">${job.status}</span>
+      </div>
+    `).join("");
+  }
+
+  function renderTopCandidates(candidates) {
+    if (!candidates || candidates.length === 0) {
+      document.getElementById('topCandidates').innerHTML = `<div class="empty-state">No candidates yet.</div>`;
+      return;
+    }
+    document.getElementById('topCandidates').innerHTML = candidates.map(c => `
+      <div class="candidate-row">
+        <div class="flex items-center gap-sm">
+          <div class="avatar-circle">${c.name.split(" ").map(n => n[0]).join("")}</div>
+          <div>
+            <div style="font-weight:600;font-size:14px;">${c.name}</div>
+            <div class="text-muted text-sm">${c.experience} experience</div>
+          </div>
+        </div>
+        <div class="score-pill" style="color:${c.matchScore >= 80 ? 'var(--color-success)' : c.matchScore >= 60 ? 'var(--color-warning)' : 'var(--color-danger)'};">
+          ${c.matchScore}%
+        </div>
+      </div>
+    `).join("");
+  }
+
+  loadDashboard();
+</script>
+
+</body>
+</html>

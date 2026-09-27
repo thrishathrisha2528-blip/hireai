@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HireAI — Job Descriptions</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  .job-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: var(--space-md);
+    gap: var(--space-md);
+  }
+  .job-card:last-child { margin-bottom: 0; }
+  .job-actions { display: flex; flex-direction: column; gap: var(--space-sm); flex-shrink: 0; }
+  .skill-tag {
+    display: inline-flex;
+    padding: 3px 10px;
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    font-weight: 600;
+    margin: 2px 4px 2px 0;
+  }
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: var(--space-lg);
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    padding: var(--space-xl);
+    width: 100%;
+    max-width: 520px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+  }
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-lg);
+  }
+  .modal-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: var(--color-text-muted);
+  }
+  .extracted-skills-box {
+    background: var(--color-bg);
+    border-radius: var(--radius-sm);
+    padding: var(--space-md);
+    margin-top: var(--space-sm);
+    display: none;
+  }
+  .empty-state {
+    text-align: center;
+    padding: var(--space-2xl);
+    color: var(--color-text-muted);
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarRoot"></div>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1>Job Descriptions</h1>
+        <p class="text-muted mt-md">Manage your open roles and let AI extract required skills automatically.</p>
+      </div>
+      <button class="btn btn-primary" onclick="openModal()">+ New Job Description</button>
+    </div>
+
+    <div id="jobsList"></div>
+  </main>
+</div>
+
+<!-- Create / Edit Job Modal -->
+<div class="modal-overlay" id="jobModal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="modalTitle">New Job Description</h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <form id="jobForm" onsubmit="handleSubmitJob(event)">
+      <div class="form-group">
+        <label class="form-label">Job Title</label>
+        <input type="text" id="jobTitle" class="form-input" placeholder="e.g. Backend Developer" required />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Department</label>
+        <input type="text" id="jobDept" class="form-input" placeholder="e.g. Engineering" required />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Number of Openings</label>
+        <input type="number" id="jobOpenings" class="form-input" placeholder="e.g. 3" min="1" step="1" value="1" required />
+        <div class="form-hint">Once this many candidates are auto-selected (match score ≥ 80%), this job is marked "Hiring Done" automatically.</div>
+      </div>
+
+      <!-- Status only matters when editing an existing job -->
+      <div class="form-group" id="statusGroup" style="display:none;">
+        <label class="form-label">Status</label>
+        <select id="jobStatus" class="form-select">
+          <option value="Active">Active</option>
+          <option value="Closed">Closed</option>
+          <option value="Hiring Done">Hiring Done</option>
+        </select>
+        <div class="form-hint">"Hiring Done" is normally set automatically once enough candidates are selected — only change this manually if you need to override it.</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Job Description</label>
+        <textarea id="jobDesc" class="form-textarea" placeholder="Paste the full job description here. AI will extract the required skills."></textarea>
+        <div class="form-hint">Tip: include required skills, tools, and experience level for better AI matching.</div>
+      </div>
+
+      <div class="form-group">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="extractSkills()">✨ Extract Skills with AI</button>
+        <div class="extracted-skills-box" id="extractedBox">
+          <div class="text-sm text-muted mb-md">Skills for this job:</div>
+          <div id="extractedSkills"></div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block" id="submitJobBtn">Create Job Description</button>
+    </form>
+  </div>
+</div>
+
+<script src="js/theme.js"></script>
+<script src="js/dummy-data.js"></script>
+<script src="js/sidebar.js"></script>
+<script>
+  if (localStorage.getItem('hireai_logged_in') !== 'true') {
+    window.location.href = 'login.html';
+  }
+  renderSidebar('jobs');
+
+  const API_BASE = 'http://127.0.0.1:5000';
+  let jobsData = [];
+  let currentExtractedSkills = [];
+  let editingJobId = null;   // null = creating, otherwise editing this job
+
+  async function loadJobs() {
+    document.getElementById('jobsList').innerHTML = `<div class="card empty-state">Loading jobs…</div>`;
+    try {
+      const res = await fetch(`${API_BASE}/api/jobs`);
+      jobsData = await res.json();
+      renderJobs();
+    } catch (err) {
+      document.getElementById('jobsList').innerHTML = `<div class="card empty-state">Could not reach the backend. Is the Flask server running?</div>`;
+    }
+  }
+
+  function jobBadgeClass(status) {
+    if (status === 'Hiring Done') return 'badge-warning';
+    if (status === 'Active') return 'badge-success';
+    return 'badge-danger';
+  }
+
+  function renderJobs() {
+    if (jobsData.length === 0) {
+      document.getElementById('jobsList').innerHTML = `<div class="card empty-state">No job descriptions yet. Click "New Job Description" to add one.</div>`;
+      return;
+    }
+    document.getElementById('jobsList').innerHTML = jobsData.map(job => `
+      <div class="card job-card">
+        <div style="flex:1;">
+          <div class="flex items-center gap-sm mb-md">
+            <h3>${job.title}</h3>
+            <span class="badge ${jobBadgeClass(job.status)}">${job.status}</span>
+          </div>
+          <div class="text-muted text-sm mb-md">${job.department} · Posted ${job.postedOn} · ${job.candidatesScreened} candidates screened · ${job.selectedCount || 0}/${job.openingsRequired || 1} selected</div>
+          <div>
+            ${job.skills.map(s => `<span class="skill-tag">${s}</span>`).join("")}
+          </div>
+        </div>
+        <div class="job-actions">
+          <a href="screening.html?jobId=${job.id}" class="btn btn-secondary btn-sm">Screen Resumes</a>
+          <button class="btn btn-secondary btn-sm" onclick="openEditModal(${job.id})">✎ Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteJob(${job.id}, '${job.title.replace(/'/g, "\\'")}')">🗑 Delete</button>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  // ---- Create mode ----
+  function openModal() {
+    editingJobId = null;
+    currentExtractedSkills = [];
+    document.getElementById('modalTitle').textContent = 'New Job Description';
+    document.getElementById('submitJobBtn').textContent = 'Create Job Description';
+    document.getElementById('statusGroup').style.display = 'none';
+    document.getElementById('jobForm').reset();
+    document.getElementById('jobOpenings').value = 1;
+    document.getElementById('extractedBox').style.display = 'none';
+    document.getElementById('jobModal').classList.add('open');
+  }
+
+  // ---- Edit mode: prefill the form with this job's current values ----
+  function openEditModal(jobId) {
+    const job = jobsData.find(j => j.id === jobId);
+    if (!job) return;
+
+    editingJobId = jobId;
+    currentExtractedSkills = [...job.skills];
+
+    document.getElementById('modalTitle').textContent = 'Edit Job Description';
+    document.getElementById('submitJobBtn').textContent = 'Save Changes';
+    document.getElementById('statusGroup').style.display = 'block';
+    document.getElementById('jobTitle').value = job.title;
+    document.getElementById('jobDept').value = job.department;
+    document.getElementById('jobOpenings').value = job.openingsRequired || 1;
+    document.getElementById('jobStatus').value = job.status;
+    document.getElementById('jobDesc').value = '';
+
+    document.getElementById('extractedSkills').innerHTML =
+      currentExtractedSkills.map(s => `<span class="skill-tag">${s}</span>`).join("");
+    document.getElementById('extractedBox').style.display = 'block';
+
+    document.getElementById('jobModal').classList.add('open');
+  }
+
+  function closeModal() {
+    document.getElementById('jobModal').classList.remove('open');
+    document.getElementById('jobForm').reset();
+    document.getElementById('extractedBox').style.display = 'none';
+    currentExtractedSkills = [];
+    editingJobId = null;
+  }
+
+  const KNOWN_SKILLS = ["React", "JavaScript", "Python", "SQL", "AWS", "Docker", "Kubernetes",
+    "Node.js", "CSS", "Git", "REST APIs", "Excel", "Power BI", "Statistics", "Linux", "CI/CD"];
+
+  function extractSkills() {
+    const text = document.getElementById('jobDesc').value;
+    if (!text.trim()) {
+      alert("Please paste a job description first.");
+      return;
+    }
+    currentExtractedSkills = KNOWN_SKILLS.filter(skill =>
+      text.toLowerCase().includes(skill.toLowerCase())
+    );
+    if (currentExtractedSkills.length === 0) {
+      currentExtractedSkills = ["Communication", "Problem Solving"];
+    }
+    document.getElementById('extractedSkills').innerHTML =
+      currentExtractedSkills.map(s => `<span class="skill-tag">${s}</span>`).join("");
+    document.getElementById('extractedBox').style.display = 'block';
+  }
+
+  // ---- One handler for both create (POST) and edit (PUT) ----
+  async function handleSubmitJob(e) {
+    e.preventDefault();
+    const title = document.getElementById('jobTitle').value.trim();
+    const dept = document.getElementById('jobDept').value.trim();
+    const skills = currentExtractedSkills.length ? currentExtractedSkills : ["General"];
+    let openingsRequired = parseInt(document.getElementById('jobOpenings').value, 10);
+    if (!openingsRequired || openingsRequired < 1) openingsRequired = 1;
+
+    const btn = document.getElementById('submitJobBtn');
+    btn.disabled = true;
+    btn.textContent = editingJobId ? 'Saving…' : 'Creating…';
+
+    try {
+      let res;
+      if (editingJobId) {
+        const status = document.getElementById('jobStatus').value;
+        res = await fetch(`${API_BASE}/api/jobs/${editingJobId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, department: dept, status, skills, openingsRequired })
+        });
+      } else {
+        res = await fetch(`${API_BASE}/api/jobs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, department: dept, skills, openingsRequired })
+        });
+      }
+
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || "Something went wrong.");
+        return;
+      }
+      closeModal();
+      await loadJobs();
+    } catch (err) {
+      alert("Could not reach the backend. Is the Flask server running?");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = editingJobId ? 'Save Changes' : 'Create Job Description';
+    }
+  }
+
+  // ---- Delete, with a confirmation step since candidates go too ----
+  async function deleteJob(jobId, jobTitle) {
+    const ok = confirm(`Delete "${jobTitle}"?\n\nThis also removes all candidates screened for this job. This cannot be undone.`);
+    if (!ok) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/jobs/${jobId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || "Could not delete this job.");
+        return;
+      }
+      await loadJobs();
+    } catch (err) {
+      alert("Could not reach the backend. Is the Flask server running?");
+    }
+  }
+
+  loadJobs();
+</script>
+
+</body>
+</html>

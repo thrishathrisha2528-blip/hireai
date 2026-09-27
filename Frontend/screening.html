@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HireAI — Resume Screening</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  .upload-zone {
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-2xl);
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: var(--color-primary);
+    background: var(--color-primary-light);
+  }
+  .upload-icon { font-size: 36px; margin-bottom: var(--space-md); }
+  .file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--color-bg);
+    border-radius: var(--radius-sm);
+    margin-top: var(--space-sm);
+    font-size: 13px;
+  }
+  .file-remove {
+    background: none;
+    border: none;
+    color: var(--color-danger);
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .progress-bar-track {
+    width: 100%;
+    height: 8px;
+    background: var(--color-bg);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+    margin: var(--space-md) 0;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--color-primary);
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+  .progress-step {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    margin-bottom: 2px;
+  }
+  .result-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-sm);
+  }
+  .result-row.duplicate-row {
+    opacity: 0.8;
+    background: var(--color-bg);
+    border-style: dashed;
+  }
+  .avatar-circle {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  .score-badge {
+    font-weight: 700;
+    font-size: 15px;
+    min-width: 50px;
+    text-align: right;
+  }
+  .badge-selected { background: var(--color-primary-light); color: var(--color-primary); }
+  .duplicate-notice {
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: var(--space-md);
+  }
+  .hidden { display: none; }
+  .empty-state {
+    text-align: center;
+    padding: var(--space-lg);
+    color: var(--color-text-muted);
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div id="sidebarRoot"></div>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1>Resume Screening</h1>
+        <p class="text-muted mt-md">Screening for: <strong id="jobTitleLabel">—</strong></p>
+      </div>
+      <a href="jobs.html" class="btn btn-secondary">← Back to Jobs</a>
+    </div>
+
+    <!-- Upload section -->
+    <div class="card mb-lg" id="uploadSection">
+      <h3 class="mb-md">Upload Resumes</h3>
+      <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+        <div class="upload-icon">📄</div>
+        <div style="font-weight:600;">Click to upload or drag & drop resumes (PDF only)</div>
+        <div class="text-muted text-sm mt-md">Each resume is read and scored by Google Gemini against this job's requirements</div>
+      </div>
+      <input type="file" id="fileInput" multiple accept=".pdf" class="hidden" onchange="handleFiles(this.files)" />
+      <div id="fileList"></div>
+
+      <button class="btn btn-primary mt-lg" id="startScreeningBtn" onclick="startScreening()" disabled>
+        Start AI Screening
+      </button>
+    </div>
+
+    <!-- Progress section -->
+    <div class="card mb-lg hidden" id="progressSection">
+      <h3 class="mb-md">Processing Resumes…</h3>
+      <div class="progress-step" id="progressStep">Sending resume to Gemini…</div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progressFill"></div>
+      </div>
+      <div class="text-muted text-sm" id="progressPercent">0%</div>
+    </div>
+
+    <!-- Results section -->
+    <div class="card hidden" id="resultsSection">
+      <div class="flex justify-between items-center mb-lg">
+        <h3>Screening Results</h3>
+        <a id="viewCandidatesLink" href="candidates.html" class="text-sm" style="color:var(--color-primary);font-weight:600;">View full candidate list →</a>
+      </div>
+      <div id="duplicateNotice"></div>
+      <div id="resultsList"></div>
+    </div>
+  </main>
+</div>
+
+<script src="js/theme.js"></script>
+<script src="js/dummy-data.js"></script>
+<script src="js/sidebar.js"></script>
+<script>
+  if (localStorage.getItem('hireai_logged_in') !== 'true') {
+    window.location.href = 'login.html';
+  }
+  renderSidebar('screening');
+
+  const API_BASE = 'http://127.0.0.1:5000';
+  const params = new URLSearchParams(window.location.search);
+  const jobId = params.get('jobId');
+
+  async function loadJobTitle() {
+    if (!jobId) {
+      document.getElementById('jobTitleLabel').textContent = "No job selected — go via Jobs page";
+      document.getElementById('startScreeningBtn').disabled = true;
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/jobs`);
+      const jobs = await res.json();
+      const job = jobs.find(j => String(j.id) === String(jobId));
+      document.getElementById('jobTitleLabel').textContent = job ? job.title : "Unknown job";
+    } catch (err) {
+      document.getElementById('jobTitleLabel').textContent = "—";
+    }
+  }
+  loadJobTitle();
+
+  let uploadedFiles = [];
+
+  function handleFiles(fileList) {
+    uploadedFiles = [...uploadedFiles, ...Array.from(fileList).filter(f => f.type === 'application/pdf')];
+    renderFileList();
+  }
+
+  function renderFileList() {
+    const list = document.getElementById('fileList');
+    list.innerHTML = uploadedFiles.map((f, i) => `
+      <div class="file-item">
+        <span>📎 ${f.name}</span>
+        <button class="file-remove" onclick="removeFile(${i})">Remove</button>
+      </div>
+    `).join("");
+    document.getElementById('startScreeningBtn').disabled = uploadedFiles.length === 0 || !jobId;
+  }
+
+  function removeFile(index) {
+    uploadedFiles.splice(index, 1);
+    renderFileList();
+  }
+
+  const zone = document.getElementById('uploadZone');
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    handleFiles(e.dataTransfer.files);
+  });
+
+  // "2026-09-26 09:01:00" -> "26 Sep 2026, 9:01 AM"
+  function formatDateTime(value) {
+    if (!value) return 'N/A';
+    const d = new Date(String(value).replace(' ', 'T'));
+    if (isNaN(d.getTime())) return value;
+    return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
+
+  function statusBadgeClass(status) {
+    if (status === 'Selected') return 'badge-selected';
+    if (status === 'Shortlisted') return 'badge-success';
+    if (status === 'Rejected') return 'badge-danger';
+    return 'badge-warning';
+  }
+
+  // ---- Real screening: send each PDF to the backend, Gemini scores it ----
+  async function startScreening() {
+    document.getElementById('uploadSection').classList.add('hidden');
+    document.getElementById('progressSection').classList.remove('hidden');
+
+    const results = [];
+    const total = uploadedFiles.length;
+
+    for (let i = 0; i < total; i++) {
+      const file = uploadedFiles[i];
+      document.getElementById('progressStep').textContent = `Gemini is reading "${file.name}"… (${i + 1}/${total})`;
+      const pct = Math.round(((i + 1) / total) * 100);
+      document.getElementById('progressFill').style.width = pct + '%';
+      document.getElementById('progressPercent').textContent = pct + '%';
+
+      const formData = new FormData();
+      formData.append('jobId', jobId);
+      formData.append('resume', file);
+
+      try {
+        const res = await fetch(`${API_BASE}/api/screen-resume`, { method: 'POST', body: formData });
+        const data = await res.json();
+        if (res.ok) {
+          results.push(data);
+        } else {
+          results.push({ name: file.name, error: data.error || 'Screening failed' });
+        }
+      } catch (err) {
+        results.push({ name: file.name, error: 'Could not reach the backend' });
+      }
+    }
+
+    showResults(results);
+  }
+
+  function showResults(results) {
+    document.getElementById('progressSection').classList.add('hidden');
+    document.getElementById('resultsSection').classList.remove('hidden');
+    document.getElementById('viewCandidatesLink').href = `candidates.html`;
+
+    const duplicateCount = results.filter(c => c.duplicate).length;
+    document.getElementById('duplicateNotice').innerHTML = duplicateCount > 0
+      ? `<div class="duplicate-notice">⚠ ${duplicateCount} of ${results.length} resume(s) were already screened for this job and ${duplicateCount === 1 ? 'was' : 'were'} skipped — showing the existing result instead.</div>`
+      : '';
+
+    document.getElementById('resultsList').innerHTML = results.map(c => {
+      if (c.error) {
+        return `<div class="result-row"><div>${c.name}</div><div class="text-muted text-sm">${c.error}</div></div>`;
+      }
+
+      const matched = c.skillsMatched || [];
+      const missing = c.skillsMissing || [];
+
+      if (c.duplicate) {
+        return `
+          <div class="result-row duplicate-row">
+            <div class="flex items-center gap-md">
+              <div class="avatar-circle">${(c.name || '?').split(" ").map(n => n[0]).join("")}</div>
+              <div>
+                <div style="font-weight:600;">${c.name}</div>
+                <div class="text-muted text-sm">⚠ Already screened for this job on ${formatDateTime(c.screenedAt)}</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-lg">
+              <span class="badge ${statusBadgeClass(c.status)}">${c.status}</span>
+              <span class="score-badge" style="color:${c.matchScore >= 80 ? 'var(--color-success)' : c.matchScore >= 60 ? 'var(--color-warning)' : 'var(--color-danger)'};">${c.matchScore}%</span>
+              <a href="candidates.html" class="btn btn-secondary btn-sm">View</a>
+            </div>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="result-row">
+          <div class="flex items-center gap-md">
+            <div class="avatar-circle">${(c.name || '?').split(" ").map(n => n[0]).join("")}</div>
+            <div>
+              <div style="font-weight:600;">${c.name}</div>
+              <div class="text-muted text-sm">${c.experience || 'N/A'} · ${matched.length}/${matched.length + missing.length} skills matched</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-lg">
+            <span class="badge ${statusBadgeClass(c.status)}">${c.status}</span>
+            <span class="score-badge" style="color:${c.matchScore >= 80 ? 'var(--color-success)' : c.matchScore >= 60 ? 'var(--color-warning)' : 'var(--color-danger)'};">${c.matchScore}%</span>
+            <a href="candidates.html" class="btn btn-secondary btn-sm">View</a>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+</script>
+
+</body>
+</html>
