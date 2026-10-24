@@ -3,11 +3,13 @@ import io
 import json
 import re
 import hashlib
+from functools import wraps
 from dotenv import load_dotenv
 import google.generativeai as genai
 import PyPDF2
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, g
 from flask_cors import CORS
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from werkzeug.security import generate_password_hash, check_password_hash
 import mysql.connector
 
@@ -17,6 +19,11 @@ gemini_model = genai.GenerativeModel('gemini-3.6-flash')
 
 app = Flask(__name__)
 CORS(app)
+
+# Secret used to sign login tokens. Set SECRET_KEY in your .env for a real value.
+app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "hireai-dev-secret-change-me")
+token_serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+TOKEN_MAX_AGE = 60 * 60 * 24 * 7  # tokens stay valid for 7 days
 
 # Threshold above which a screened candidate is automatically marked "Selected"
 AUTO_SELECT_THRESHOLD = 80
@@ -29,6 +36,28 @@ def get_db_connection():
         password="",  # default XAMPP MySQL password is empty; change if you set one
         database="hireai_db"
     )
+
+# ---------- Auth helpers ----------
+def login_required(f):
+    """Reads 'Authorization: Bearer <token>', verifies it, and sets g.user_id."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return jsonify({"error": "Login required"}), 401
+        token = auth_header[len('Bearer '):]
+        try:
+            data = token_serializer.loads(token, max_age=TOKEN_MAX_AGE)
+        except (BadSignature, SignatureExpired):
+            return jsonify({"error": "Session expired. Please log in again."}), 401
+        g.user_id = data['user_id']
+        return f(*args, **kwargs)
+    return wrapper
+
+def get_owned_job(cursor, job_id):
+    """Returns the job only if it belongs to the logged-in user, else None."""
+    cursor.execute("SELECT * FROM jobs WHERE id = %s AND user_id = %s", (job_id, g.user_id))
+    return cursor.fetchone()
 
 @app.route('/')
 def home():
@@ -82,8 +111,10 @@ def login():
         conn.close()
 
         if user and check_password_hash(user['password'], password):
+            token = token_serializer.dumps({"user_id": user['id']})
             return jsonify({
                 "message": "Login successful",
+                "token": token,
                 "user": {"name": user['name'], "email": user['email']}
             }), 200
         else:
@@ -91,8 +122,9 @@ def login():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ---------- Get all jobs ----------
+# ---------- Get all jobs (only the logged-in user's) ----------
 @app.route('/api/jobs', methods=['GET'])
+@login_required
 def get_jobs():
     try:
         conn = get_db_connection()
@@ -102,8 +134,9 @@ def get_jobs():
                 (SELECT COUNT(*) FROM candidates c
                  WHERE c.job_id = j.id AND c.status = 'Selected') AS selected_count
             FROM jobs j
+            WHERE j.user_id = %s
             ORDER BY j.id DESC
-        """)
+        """, (g.user_id,))
         jobs = cursor.fetchall()
         cursor.close()
         conn.close()
@@ -116,8 +149,8 @@ def get_jobs():
             job['selectedCount'] = job.pop('selected_count', 0)
             del job['posted_on']
             del job['candidates_screened']
-            if 'openings_required' in job:
-                del job['openings_required']
+            job.pop('openings_required', None)
+            job.pop('user_id', None)
 
         return jsonify(jobs), 200
     except Exception as e:
@@ -125,6 +158,7 @@ def get_jobs():
 
 # ---------- Create a new job ----------
 @app.route('/api/jobs', methods=['POST'])
+@login_required
 def create_job():
     data = request.get_json()
     title = data.get('title')
@@ -148,8 +182,9 @@ def create_job():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO jobs (title, department, status, skills, openings_required) VALUES (%s, %s, %s, %s, %s)",
-            (title, department, 'Active', skills_str, openings_required)
+            "INSERT INTO jobs (title, department, status, skills, openings_required, user_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (title, department, 'Active', skills_str, openings_required, g.user_id)
         )
         conn.commit()
         new_id = cursor.lastrowid
@@ -161,6 +196,7 @@ def create_job():
 
 # ---------- Update a job ----------
 @app.route('/api/jobs/<int:job_id>', methods=['PUT'])
+@login_required
 def update_job(job_id):
     data = request.get_json()
     title = data.get('title')
@@ -176,23 +212,30 @@ def update_job(job_id):
 
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
+        if not get_owned_job(cursor, job_id):
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "Job not found"}), 404
+        cursor.close()
+
+        cursor2 = conn.cursor()
         if openings_required is not None:
             try:
                 openings_required = max(1, int(openings_required))
             except (TypeError, ValueError):
                 openings_required = 1
-            cursor.execute(
+            cursor2.execute(
                 "UPDATE jobs SET title=%s, department=%s, status=%s, skills=%s, openings_required=%s WHERE id=%s",
                 (title, department, status or 'Active', skills_str, openings_required, job_id)
             )
         else:
-            cursor.execute(
+            cursor2.execute(
                 "UPDATE jobs SET title=%s, department=%s, status=%s, skills=%s WHERE id=%s",
                 (title, department, status or 'Active', skills_str, job_id)
             )
         conn.commit()
-        cursor.close()
+        cursor2.close()
         conn.close()
         return jsonify({"message": "Job updated"}), 200
     except Exception as e:
@@ -200,31 +243,47 @@ def update_job(job_id):
 
 # ---------- Delete a job ----------
 @app.route('/api/jobs/<int:job_id>', methods=['DELETE'])
+@login_required
 def delete_job(job_id):
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        # Remove candidates linked to this job first (foreign key constraint)
-        cursor.execute("DELETE FROM candidates WHERE job_id = %s", (job_id,))
-        cursor.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
-        conn.commit()
+        cursor = conn.cursor(dictionary=True)
+        if not get_owned_job(cursor, job_id):
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "Job not found"}), 404
         cursor.close()
+
+        cursor2 = conn.cursor()
+        # Remove candidates linked to this job first (foreign key constraint)
+        cursor2.execute("DELETE FROM candidates WHERE job_id = %s", (job_id,))
+        cursor2.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
+        conn.commit()
+        cursor2.close()
         conn.close()
         return jsonify({"message": "Job deleted"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ---------- Get all candidates (optionally filter by job_id) ----------
+# ---------- Get candidates for the logged-in user's jobs (optionally filter by job_id) ----------
 @app.route('/api/candidates', methods=['GET'])
+@login_required
 def get_candidates():
     job_id = request.args.get('jobId')
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
+
+        query = ("SELECT c.* FROM candidates c "
+                 "JOIN jobs j ON c.job_id = j.id "
+                 "WHERE j.user_id = %s")
+        params = [g.user_id]
         if job_id:
-            cursor.execute("SELECT * FROM candidates WHERE job_id = %s ORDER BY match_score DESC", (job_id,))
-        else:
-            cursor.execute("SELECT * FROM candidates ORDER BY match_score DESC")
+            query += " AND c.job_id = %s"
+            params.append(job_id)
+        query += " ORDER BY c.match_score DESC"
+
+        cursor.execute(query, tuple(params))
         candidates = cursor.fetchall()
         cursor.close()
         conn.close()
@@ -248,6 +307,7 @@ def get_candidates():
 
 # ---------- Update a candidate's status ----------
 @app.route('/api/candidates/<int:candidate_id>/status', methods=['PATCH'])
+@login_required
 def update_candidate_status(candidate_id):
     data = request.get_json()
     new_status = data.get('status')
@@ -258,7 +318,12 @@ def update_candidate_status(candidate_id):
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT job_id FROM candidates WHERE id = %s", (candidate_id,))
+        cursor.execute(
+            "SELECT c.job_id FROM candidates c "
+            "JOIN jobs j ON c.job_id = j.id "
+            "WHERE c.id = %s AND j.user_id = %s",
+            (candidate_id, g.user_id)
+        )
         row = cursor.fetchone()
         if not row:
             cursor.close()
@@ -278,33 +343,55 @@ def update_candidate_status(candidate_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ---------- Dashboard summary ----------
+# ---------- Dashboard summary (only the logged-in user's data) ----------
 @app.route('/api/dashboard', methods=['GET'])
+@login_required
 def get_dashboard():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
+        uid = g.user_id
 
-        cursor.execute("SELECT COUNT(*) as total FROM jobs WHERE status='Active'")
+        cursor.execute("SELECT COUNT(*) as total FROM jobs WHERE status='Active' AND user_id = %s", (uid,))
         total_jobs = cursor.fetchone()['total']
 
-        cursor.execute("SELECT COUNT(*) as total FROM candidates")
+        cursor.execute(
+            "SELECT COUNT(*) as total FROM candidates c JOIN jobs j ON c.job_id = j.id WHERE j.user_id = %s",
+            (uid,)
+        )
         total_candidates = cursor.fetchone()['total']
 
-        cursor.execute("SELECT COUNT(*) as total FROM candidates WHERE status='Shortlisted'")
+        cursor.execute(
+            "SELECT COUNT(*) as total FROM candidates c JOIN jobs j ON c.job_id = j.id "
+            "WHERE j.user_id = %s AND c.status = 'Shortlisted'",
+            (uid,)
+        )
         shortlisted = cursor.fetchone()['total']
 
-        cursor.execute("SELECT AVG(match_score) as avg_score FROM candidates")
+        cursor.execute(
+            "SELECT AVG(c.match_score) as avg_score FROM candidates c JOIN jobs j ON c.job_id = j.id "
+            "WHERE j.user_id = %s",
+            (uid,)
+        )
         avg_result = cursor.fetchone()
         avg_score = round(avg_result['avg_score']) if avg_result['avg_score'] else 0
 
-        cursor.execute("SELECT id, title, department, posted_on, status FROM jobs ORDER BY id DESC LIMIT 3")
+        cursor.execute(
+            "SELECT id, title, department, posted_on, status FROM jobs WHERE user_id = %s "
+            "ORDER BY id DESC LIMIT 3",
+            (uid,)
+        )
         recent_jobs = cursor.fetchall()
         for job in recent_jobs:
             job['postedOn'] = str(job['posted_on'])
             del job['posted_on']
 
-        cursor.execute("SELECT id, name, experience, match_score FROM candidates ORDER BY match_score DESC LIMIT 4")
+        cursor.execute(
+            "SELECT c.id, c.name, c.experience, c.match_score FROM candidates c "
+            "JOIN jobs j ON c.job_id = j.id WHERE j.user_id = %s "
+            "ORDER BY c.match_score DESC LIMIT 4",
+            (uid,)
+        )
         top_candidates = cursor.fetchall()
         for c in top_candidates:
             c['matchScore'] = c.pop('match_score')
@@ -361,6 +448,7 @@ def update_job_hiring_status(conn, job_id):
 
 # ---------- Real AI-powered resume screening ----------
 @app.route('/api/screen-resume', methods=['POST'])
+@login_required
 def screen_resume():
     job_id = request.form.get('jobId')
     file = request.files.get('resume')
@@ -371,8 +459,7 @@ def screen_resume():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM jobs WHERE id = %s", (job_id,))
-        job = cursor.fetchone()
+        job = get_owned_job(cursor, job_id)
         if not job:
             cursor.close()
             conn.close()

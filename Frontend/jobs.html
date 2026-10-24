@@ -147,6 +147,7 @@
 </div>
 
 <script src="js/theme.js"></script>
+<script src="js/auth.js"></script>
 <script src="js/dummy-data.js"></script>
 <script src="js/sidebar.js"></script>
 <script>
@@ -178,6 +179,10 @@
   }
 
   function renderJobs() {
+    if (!Array.isArray(jobsData)) {
+      document.getElementById('jobsList').innerHTML = `<div class="card empty-state">${jobsData.error || 'Could not load jobs.'}</div>`;
+      return;
+    }
     if (jobsData.length === 0) {
       document.getElementById('jobsList').innerHTML = `<div class="card empty-state">No job descriptions yet. Click "New Job Description" to add one.</div>`;
       return;

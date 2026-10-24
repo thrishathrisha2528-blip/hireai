@@ -204,8 +204,12 @@
         if (!res.ok) {
           errorBox.textContent = data.error || "Login failed.";
           errorBox.style.display = 'block';
+        } else if (!data.token) {
+          errorBox.textContent = "Server did not send a login token. Restart Flask with the updated app.py.";
+          errorBox.style.display = 'block';
         } else {
           localStorage.setItem('hireai_logged_in', 'true');
+          localStorage.setItem('hireai_token', data.token);
           localStorage.setItem('hireai_user_email', data.user.email);
           localStorage.setItem('hireai_user_name', data.user.name || '');
           window.location.href = 'dashboard.html';

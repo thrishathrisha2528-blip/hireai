@@ -103,6 +103,7 @@
 </div>
 
 <script src="js/theme.js"></script>
+<script src="js/auth.js"></script>
 <script src="js/dummy-data.js"></script>
 <script src="js/sidebar.js"></script>
 <script>
@@ -124,6 +125,13 @@
     try {
       const res = await fetch(`${API_BASE}/api/dashboard`);
       const data = await res.json();
+
+      if (!res.ok) {
+        document.getElementById('statCards').innerHTML =
+          `<div class="card empty-state" style="grid-column: span 4;">${data.error || 'Could not load the dashboard.'}</div>`;
+        return;
+      }
+
       renderStats(data.stats);
       renderRecentJobs(data.recentJobs);
       renderTopCandidates(data.topCandidates);
@@ -150,6 +158,12 @@
     `).join("");
   }
 
+  function jobBadgeClass(status) {
+    if (status === 'Hiring Done') return 'badge-warning';
+    if (status === 'Active') return 'badge-success';
+    return 'badge-danger';
+  }
+
   function renderRecentJobs(jobs) {
     if (!jobs || jobs.length === 0) {
       document.getElementById('recentJobs').innerHTML = `<div class="empty-state">No jobs yet.</div>`;
@@ -161,7 +175,7 @@
           <div style="font-weight:600;font-size:14px;">${job.title}</div>
           <div class="text-muted text-sm">${job.department} · Posted ${job.postedOn}</div>
         </div>
-        <span class="badge ${job.status === 'Active' ? 'badge-success' : 'badge-danger'}">${job.status}</span>
+        <span class="badge ${jobBadgeClass(job.status)}">${job.status}</span>
       </div>
     `).join("");
   }

@@ -159,6 +159,7 @@
 </div>
 
 <script src="js/theme.js"></script>
+<script src="js/auth.js"></script>
 <script src="js/dummy-data.js"></script>
 <script src="js/sidebar.js"></script>
 <script>
@@ -180,7 +181,7 @@
     try {
       const res = await fetch(`${API_BASE}/api/jobs`);
       const jobs = await res.json();
-      const job = jobs.find(j => String(j.id) === String(jobId));
+      const job = Array.isArray(jobs) ? jobs.find(j => String(j.id) === String(jobId)) : null;
       document.getElementById('jobTitleLabel').textContent = job ? job.title : "Unknown job";
     } catch (err) {
       document.getElementById('jobTitleLabel').textContent = "—";

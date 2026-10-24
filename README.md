@@ -80,7 +80,7 @@ Open the `Frontend/` folder with a static server such as **VS Code Live Server**
 
 ## 👥 Team
 
-Built by a 3-member college team as part of a competitive/college project.
+Built by a 4-member college team as part of a competitive/college project.
 
 ## 📄 License
 

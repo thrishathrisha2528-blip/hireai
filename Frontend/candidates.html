@@ -165,6 +165,7 @@
 </div>
 
 <script src="js/theme.js"></script>
+<script src="js/auth.js"></script>
 <script src="js/dummy-data.js"></script>
 <script src="js/sidebar.js"></script>
 <script>
@@ -183,7 +184,8 @@
     document.getElementById('candidatesList').innerHTML = `<div class="card empty-state">Loading candidates…</div>`;
     try {
       const res = await fetch(`${API_BASE}/api/candidates`);
-      candidatesData = await res.json();
+      const data = await res.json();
+      candidatesData = Array.isArray(data) ? data : [];
       renderCandidates();
     } catch (err) {
       document.getElementById('candidatesList').innerHTML = `<div class="card empty-state">Could not reach the backend. Is the Flask server running?</div>`;
