@@ -132,7 +132,9 @@ def get_jobs():
         cursor.execute("""
             SELECT j.*,
                 (SELECT COUNT(*) FROM candidates c
-                 WHERE c.job_id = j.id AND c.status = 'Selected') AS selected_count
+                 WHERE c.job_id = j.id AND c.status = 'Selected') AS selected_count,
+                (SELECT COUNT(*) FROM candidates c
+                 WHERE c.job_id = j.id) AS screened_count
             FROM jobs j
             WHERE j.user_id = %s
             ORDER BY j.id DESC
@@ -144,7 +146,7 @@ def get_jobs():
         for job in jobs:
             job['skills'] = job['skills'].split(',') if job['skills'] else []
             job['postedOn'] = str(job['posted_on'])
-            job['candidatesScreened'] = job['candidates_screened']
+            job['candidatesScreened'] = job.pop('screened_count', 0)
             job['openingsRequired'] = job.get('openings_required', 1)
             job['selectedCount'] = job.pop('selected_count', 0)
             del job['posted_on']
@@ -153,6 +155,52 @@ def get_jobs():
             job.pop('user_id', None)
 
         return jsonify(jobs), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ---------- AI skill extraction from a pasted job description ----------
+@app.route('/api/extract-skills', methods=['POST'])
+@login_required
+def extract_skills():
+    data = request.get_json() or {}
+    description = (data.get('description') or '').strip()
+
+    if not description:
+        return jsonify({"error": "Job description is required"}), 400
+
+    prompt = f"""
+You are a recruitment assistant. Read this job description and list the key skills a candidate needs.
+
+JOB DESCRIPTION:
+{description[:6000]}
+
+Rules:
+- Return between 4 and 10 skills.
+- Each skill is a short name of 1 to 3 words, e.g. "React", "REST APIs", "Communication".
+- Include soft skills only if the description actually mentions them.
+
+Respond with ONLY valid JSON (no markdown, no explanation) in this exact format:
+{{"skills": ["skill1", "skill2"]}}
+"""
+    try:
+        response = gemini_model.generate_content(prompt)
+        raw_text = response.text.strip()
+        raw_text = re.sub(r"^```json\s*|\s*```$", "", raw_text, flags=re.MULTILINE).strip()
+        result = json.loads(raw_text)
+
+        # Skills are stored comma-separated, so strip commas and angle brackets from each one
+        skills = []
+        for s in result.get('skills', []):
+            if isinstance(s, str):
+                clean = s.replace(',', ' ').replace('<', '').replace('>', '').strip()
+                if clean:
+                    skills.append(clean)
+
+        if not skills:
+            return jsonify({"error": "No skills could be extracted"}), 422
+        return jsonify({"skills": skills[:10]}), 200
+    except json.JSONDecodeError:
+        return jsonify({"error": "AI response could not be parsed. Try again."}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -274,14 +322,14 @@ def get_candidates():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        query = ("SELECT c.* FROM candidates c "
+        query = ("SELECT c.*, j.title AS job_title FROM candidates c "
                  "JOIN jobs j ON c.job_id = j.id "
                  "WHERE j.user_id = %s")
         params = [g.user_id]
         if job_id:
             query += " AND c.job_id = %s"
             params.append(job_id)
-        query += " ORDER BY c.match_score DESC"
+        query += " ORDER BY c.id DESC"
 
         cursor.execute(query, tuple(params))
         candidates = cursor.fetchall()
@@ -290,6 +338,7 @@ def get_candidates():
 
         for c in candidates:
             c['jobId'] = c.pop('job_id')
+            c['jobTitle'] = c.pop('job_title')
             c['matchScore'] = c.pop('match_score')
             c['skillsMatched'] = c.pop('skills_matched').split(',') if c['skills_matched'] else []
             c['skillsMissing'] = c.pop('skills_missing').split(',') if c['skills_missing'] else []
@@ -363,7 +412,7 @@ def get_dashboard():
 
         cursor.execute(
             "SELECT COUNT(*) as total FROM candidates c JOIN jobs j ON c.job_id = j.id "
-            "WHERE j.user_id = %s AND c.status = 'Shortlisted'",
+            "WHERE j.user_id = %s AND c.status IN ('Shortlisted', 'Selected')",
             (uid,)
         )
         shortlisted = cursor.fetchone()['total']
@@ -396,6 +445,53 @@ def get_dashboard():
         for c in top_candidates:
             c['matchScore'] = c.pop('match_score')
 
+        # ---- Chart data: candidates per status ----
+        cursor.execute(
+            "SELECT c.status, COUNT(*) AS cnt FROM candidates c "
+            "JOIN jobs j ON c.job_id = j.id WHERE j.user_id = %s GROUP BY c.status",
+            (uid,)
+        )
+        status_breakdown = {"Selected": 0, "Shortlisted": 0, "Under Review": 0, "Rejected": 0}
+        for row in cursor.fetchall():
+            status_breakdown[row['status']] = int(row['cnt'])
+
+        # ---- Chart data: how many candidates fall in each match-score range ----
+        cursor.execute(
+            "SELECT "
+            "SUM(c.match_score < 40) AS b1, "
+            "SUM(c.match_score >= 40 AND c.match_score < 60) AS b2, "
+            "SUM(c.match_score >= 60 AND c.match_score < 80) AS b3, "
+            "SUM(c.match_score >= 80) AS b4 "
+            "FROM candidates c JOIN jobs j ON c.job_id = j.id WHERE j.user_id = %s",
+            (uid,)
+        )
+        dist = cursor.fetchone()
+        score_distribution = [
+            {"label": "0–39", "count": int(dist['b1'] or 0)},
+            {"label": "40–59", "count": int(dist['b2'] or 0)},
+            {"label": "60–79", "count": int(dist['b3'] or 0)},
+            {"label": "80–100", "count": int(dist['b4'] or 0)},
+        ]
+
+        # ---- Chart data: hiring progress for the user's busiest jobs ----
+        cursor.execute(
+            "SELECT j.title, COALESCE(j.openings_required, 1) AS openings, "
+            "(SELECT COUNT(*) FROM candidates c WHERE c.job_id = j.id) AS screened, "
+            "(SELECT COUNT(*) FROM candidates c WHERE c.job_id = j.id AND c.status = 'Selected') AS selected "
+            "FROM jobs j WHERE j.user_id = %s "
+            "ORDER BY screened DESC, j.id DESC LIMIT 6",
+            (uid,)
+        )
+        job_breakdown = [
+            {
+                "title": r['title'],
+                "openings": int(r['openings']),
+                "screened": int(r['screened']),
+                "selected": int(r['selected'])
+            }
+            for r in cursor.fetchall()
+        ]
+
         cursor.close()
         conn.close()
 
@@ -407,7 +503,10 @@ def get_dashboard():
                 "avgMatchScore": avg_score
             },
             "recentJobs": recent_jobs,
-            "topCandidates": top_candidates
+            "topCandidates": top_candidates,
+            "statusBreakdown": status_breakdown,
+            "scoreDistribution": score_distribution,
+            "jobBreakdown": job_breakdown
         }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500

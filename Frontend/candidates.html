@@ -14,6 +14,15 @@
     margin-bottom: var(--space-lg);
     flex-wrap: wrap;
   }
+  .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+  }
+  .sort-select {
+    width: auto;
+  }
   .search-input {
     max-width: 280px;
   }
@@ -61,6 +70,19 @@
     font-weight: 700;
     font-size: 14px;
     flex-shrink: 0;
+  }
+  .job-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    margin-left: var(--space-sm);
+    border-radius: var(--radius-full);
+    border: 1px solid var(--color-border);
+    background: var(--color-bg);
+    color: var(--color-text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: middle;
   }
   .score-badge {
     font-weight: 700;
@@ -114,6 +136,11 @@
     padding-top: var(--space-lg);
     border-top: 1px solid var(--color-border);
   }
+  .section-note {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-md);
+  }
   .question-item, .suggestion-item {
     padding: var(--space-sm) 0;
     font-size: 14px;
@@ -144,12 +171,18 @@
         <h1>Candidates</h1>
         <p class="text-muted mt-md">All screened candidates across your job postings.</p>
       </div>
-      <button class="btn btn-secondary" onclick="exportCSV()">⬇ Export CSV</button>
+      <button class="btn btn-secondary" onclick="exportExcel()">⬇ Export Excel</button>
     </div>
 
     <div class="toolbar">
       <div class="filter-bar" id="filterBar"></div>
-      <input type="text" id="searchInput" class="form-input search-input" placeholder="🔍 Search by name or email…" oninput="renderCandidates()" />
+      <div class="toolbar-right">
+        <select id="sortSelect" class="form-select sort-select" onchange="renderCandidates()">
+          <option value="latest">Sort: Latest screened</option>
+          <option value="match">Sort: Highest match</option>
+        </select>
+        <input type="text" id="searchInput" class="form-input search-input" placeholder="🔍 Search name, email or job…" oninput="renderCandidates()" />
+      </div>
     </div>
 
     <div id="candidatesList"></div>
@@ -168,6 +201,8 @@
 <script src="js/auth.js"></script>
 <script src="js/dummy-data.js"></script>
 <script src="js/sidebar.js"></script>
+<!-- Used only for the Excel export. If it can't load (no internet), export falls back to CSV. -->
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
   if (localStorage.getItem('hireai_logged_in') !== 'true') {
     window.location.href = 'login.html';
@@ -190,6 +225,12 @@
     } catch (err) {
       document.getElementById('candidatesList').innerHTML = `<div class="card empty-state">Could not reach the backend. Is the Flask server running?</div>`;
     }
+  }
+
+  function esc(value) {
+    return String(value).replace(/[&<>"']/g, ch => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+    ));
   }
 
   // "2026-09-26 09:01:00" -> "26 Sep 2026, 9:01 AM"
@@ -227,10 +268,22 @@
     const query = document.getElementById('searchInput').value.trim().toLowerCase();
     if (query) {
       list = list.filter(c =>
-        c.name.toLowerCase().includes(query) || (c.email || '').toLowerCase().includes(query)
+        c.name.toLowerCase().includes(query) ||
+        (c.email || '').toLowerCase().includes(query) ||
+        (c.jobTitle || '').toLowerCase().includes(query)
       );
     }
-    return [...list].sort((a, b) => b.matchScore - a.matchScore);
+
+    // "latest" = most recently screened first (higher id = screened later)
+    const sortBy = document.getElementById('sortSelect').value;
+    if (sortBy === 'match') {
+      return [...list].sort((a, b) => b.matchScore - a.matchScore || b.id - a.id);
+    }
+    return [...list].sort((a, b) => b.id - a.id);
+  }
+
+  function screenedText(c) {
+    return c.screenedAt ? ` · Screened ${formatDateTime(c.screenedAt)}` : '';
   }
 
   function renderCandidates() {
@@ -246,8 +299,8 @@
         <div class="flex items-center gap-md">
           <div class="avatar-circle">${c.name.split(" ").map(n => n[0]).join("")}</div>
           <div>
-            <div style="font-weight:600;">${c.name}</div>
-            <div class="text-muted text-sm">${c.email || ''} · ${c.experience} · Screened ${formatDateTime(c.screenedAt)}</div>
+            <div style="font-weight:600;">${c.name}<span class="job-chip">💼 ${esc(c.jobTitle || 'Unknown job')}</span></div>
+            <div class="text-muted text-sm">${c.email || ''} · ${c.experience}${screenedText(c)}</div>
           </div>
         </div>
         <div class="flex items-center gap-lg">
@@ -268,7 +321,8 @@
         <div>
           <h2>${c.name}</h2>
           <div class="text-muted text-sm">${c.email || ''} · ${c.experience} experience</div>
-          <div class="text-muted text-sm">Screened on ${formatDateTime(c.screenedAt)}</div>
+          <div class="text-muted text-sm">Screened for: <strong>${esc(c.jobTitle || 'Unknown job')}</strong></div>
+          ${c.screenedAt ? `<div class="text-muted text-sm">Screened on ${formatDateTime(c.screenedAt)}</div>` : ''}
         </div>
       </div>
 
@@ -292,8 +346,9 @@
         ${c.skillsMissing.map(s => `<span class="skill-tag skill-missing">✕ ${s}</span>`).join("") || '<span class="text-sm text-muted">None</span>'}
       </div>
 
-            <div class="modal-section">
+      <div class="modal-section">
         <h3 class="mb-md">🎤 AI-Suggested Interview Questions</h3>
+        <div class="section-note">Generated from this resume and its skill gaps to help in the interview round. They are not used to calculate the match score.</div>
         ${(c.interviewQuestions && c.interviewQuestions.length)
           ? c.interviewQuestions.map(q => `<div class="question-item"><span>•</span><span>${q}</span></div>`).join("")
           : '<div class="text-sm text-muted">Not available — this candidate wasn\'t screened through the AI upload flow.</div>'}
@@ -338,16 +393,128 @@
     document.getElementById('candidateModal').classList.remove('open');
   }
 
-  // Export currently filtered/searched candidates as a downloadable CSV
+  // ---------- Excel export (neat columns, wrapped skills, coloured status) ----------
+  const STATUS_EXCEL_STYLES = {
+    'Selected':     { fill: 'FFFDE8C8', font: 'FF9A5B0A' },
+    'Shortlisted':  { fill: 'FFD9F2E3', font: 'FF1E7B45' },
+    'Under Review': { fill: 'FFFFF3C4', font: 'FF8A6D00' },
+    'Rejected':     { fill: 'FFFAD9D9', font: 'FFB42318' }
+  };
+
+  // "2026-10-24 18:26:00" -> a Date that Excel will show as exactly 24 Oct 2026, 6:26 PM
+  function toExcelDate(value) {
+    const m = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (!m) return null;
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)));
+  }
+
+  function buildCandidatesWorkbook(list) {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Candidates');
+
+    sheet.columns = [
+      { header: 'Name',           key: 'name',          width: 22 },
+      { header: 'Email',          key: 'email',         width: 32 },
+      { header: 'Job',            key: 'job',           width: 28 },
+      { header: 'Experience',     key: 'experience',    width: 14 },
+      { header: 'Match Score',    key: 'score',         width: 13 },
+      { header: 'Status',         key: 'status',        width: 15 },
+      { header: 'Screened At',    key: 'screenedAt',    width: 23 },
+      { header: 'Skills Matched', key: 'skillsMatched', width: 40 },
+      { header: 'Skills Missing', key: 'skillsMissing', width: 50 }
+    ];
+
+    const joinSkills = skills => (skills || []).map(s => String(s).trim()).filter(Boolean).join('; ');
+
+    list.forEach(c => {
+      const row = sheet.addRow({
+        name: c.name,
+        email: c.email || '',
+        job: c.jobTitle || '',
+        experience: c.experience,
+        score: c.matchScore / 100,
+        status: c.status,
+        screenedAt: toExcelDate(c.screenedAt) || '',
+        skillsMatched: joinSkills(c.skillsMatched),
+        skillsMissing: joinSkills(c.skillsMissing)
+      });
+
+      row.getCell('score').numFmt = '0%';
+      row.getCell('screenedAt').numFmt = 'dd mmm yyyy, h:mm AM/PM';
+
+      const style = STATUS_EXCEL_STYLES[c.status];
+      if (style) {
+        const statusCell = row.getCell('status');
+        statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: style.fill } };
+        statusCell.font = { bold: true, color: { argb: style.font } };
+      }
+    });
+
+    // Header row
+    const header = sheet.getRow(1);
+    header.height = 24;
+    header.eachCell(cell => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB45309' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    });
+
+    // Borders on every cell, top-aligned wrapped text in the body
+    const thin = { style: 'thin', color: { argb: 'FFE2E0DA' } };
+    sheet.eachRow((row, rowNumber) => {
+      row.eachCell({ includeEmpty: true }, cell => {
+        cell.border = { top: thin, left: thin, bottom: thin, right: thin };
+        if (rowNumber > 1) cell.alignment = { vertical: 'top', wrapText: true };
+      });
+    });
+
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: sheet.columns.length } };
+    return workbook;
+  }
+
+  // Exports exactly what you see (current filter, search and sort)
+  async function exportExcel() {
+    const list = getFilteredList();
+    if (list.length === 0) {
+      alert("No candidates to export.");
+      return;
+    }
+
+    // Excel library didn't load (e.g. no internet) -> plain CSV instead
+    if (typeof ExcelJS === 'undefined') {
+      exportCSV();
+      return;
+    }
+
+    try {
+      const workbook = buildCandidatesWorkbook(list);
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `hireai-candidates-${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("Could not create the Excel file. Downloading CSV instead.");
+      exportCSV();
+    }
+  }
+
+  // Fallback: plain CSV export
   function exportCSV() {
     const list = getFilteredList();
     if (list.length === 0) {
       alert("No candidates to export.");
       return;
     }
-    const headers = ["Name", "Email", "Experience", "Match Score", "Status", "Screened At", "Skills Matched", "Skills Missing"];
+    const headers = ["Name", "Email", "Job", "Experience", "Match Score", "Status", "Screened At", "Skills Matched", "Skills Missing"];
     const rows = list.map(c => [
-      c.name, c.email || '', c.experience, c.matchScore + "%", c.status, formatDateTime(c.screenedAt),
+      c.name, c.email || '', c.jobTitle || '', c.experience, c.matchScore + "%", c.status, formatDateTime(c.screenedAt),
       c.skillsMatched.join("; "), c.skillsMissing.join("; ")
     ]);
 

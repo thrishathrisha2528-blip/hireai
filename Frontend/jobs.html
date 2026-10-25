@@ -134,7 +134,7 @@
       </div>
 
       <div class="form-group">
-        <button type="button" class="btn btn-secondary btn-sm" onclick="extractSkills()">✨ Extract Skills with AI</button>
+        <button type="button" id="extractBtn" class="btn btn-secondary btn-sm" onclick="extractSkills()">✨ Extract Skills with AI</button>
         <div class="extracted-skills-box" id="extractedBox">
           <div class="text-sm text-muted mb-md">Skills for this job:</div>
           <div id="extractedSkills"></div>
@@ -256,18 +256,39 @@
   const KNOWN_SKILLS = ["React", "JavaScript", "Python", "SQL", "AWS", "Docker", "Kubernetes",
     "Node.js", "CSS", "Git", "REST APIs", "Excel", "Power BI", "Statistics", "Linux", "CI/CD"];
 
-  function extractSkills() {
+  async function extractSkills() {
     const text = document.getElementById('jobDesc').value;
     if (!text.trim()) {
       alert("Please paste a job description first.");
       return;
     }
-    currentExtractedSkills = KNOWN_SKILLS.filter(skill =>
-      text.toLowerCase().includes(skill.toLowerCase())
-    );
-    if (currentExtractedSkills.length === 0) {
-      currentExtractedSkills = ["Communication", "Problem Solving"];
+
+    const btn = document.getElementById('extractBtn');
+    btn.disabled = true;
+    btn.textContent = '✨ Extracting…';
+
+    try {
+      const res = await fetch(`${API_BASE}/api/extract-skills`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: text })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Extraction failed');
+      currentExtractedSkills = data.skills;
+    } catch (err) {
+      // AI unavailable: fall back to simple keyword matching
+      currentExtractedSkills = KNOWN_SKILLS.filter(skill =>
+        text.toLowerCase().includes(skill.toLowerCase())
+      );
+      if (currentExtractedSkills.length === 0) {
+        currentExtractedSkills = ["Communication", "Problem Solving"];
+      }
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '✨ Extract Skills with AI';
     }
+
     document.getElementById('extractedSkills').innerHTML =
       currentExtractedSkills.map(s => `<span class="skill-tag">${s}</span>`).join("");
     document.getElementById('extractedBox').style.display = 'block';
